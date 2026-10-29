@@ -66,7 +66,7 @@
         <ol>
           <li>Dê dois cliques no arquivo baixado. Se aparecer "O Windows protegeu o PC", clique em <b>Mais informações</b> e depois em <b>Executar assim mesmo</b>.</li>
           <li>Confirme o aviso de administrador, clique em <b>Install Driver</b> e <b>reinicie o PC</b>.</li>
-          <li>Volte aqui, conecte o celular com o microfone marcado, clique em <b>Escolher saída do microfone</b> e depois em <b>CABLE Input</b>.</li>
+          <li>Volte aqui, conecte o celular com o microfone marcado, clique em <b>Escolher saída do microfone</b> (ele já seleciona o <b>CABLE Input</b> sozinho).</li>
           <li>No Discord: Configurações → Voz e vídeo → Dispositivo de entrada → <b>CABLE Output</b>.</li>
         </ol>
         <details>
@@ -81,6 +81,7 @@
         <p class="foot">O VB-Cable é donationware: se gostar, apoie o autor.</p>
         <div class="meter"><i id="micLvl"></i></div>
         <button id="pickOut">Escolher saída do microfone</button>
+        <select id="outSel" hidden style="font:inherit;font-size:15px;padding:12px;border-radius:12px;border:1px solid var(--line);background:#0f1115;color:var(--fg);width:100%"></select>
         <div class="status" id="micStatus"></div>
       </div>
 
@@ -215,23 +216,60 @@ async function applyOut(){
   }
 }
 
+// O Chrome não tem selectAudioOutput(), então listamos as saídas com enumerateDevices()
+async function listOutputs(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
+  let outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+  if(outs.length && outs.every(d => !d.label)){
+    // o Chrome só mostra os nomes depois de uma permissão de microfone (uma vez só)
+    try{
+      const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tmp.getTracks().forEach(t => t.stop());
+      outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+    }catch(e){}
+  }
+  return outs;
+}
+
+async function chooseOut(id, label){
+  outId = id; outLabel = label || '';
+  try{ localStorage.setItem('outId', outId); localStorage.setItem('outLabel', outLabel); }catch(e){}
+  $('pickOut').textContent = outButtonText();
+  await applyOut();
+}
+
 async function pickOut(){
-  const st = $('micStatus');
-  if(!navigator.mediaDevices || !navigator.mediaDevices.selectAudioOutput){
-    setStatus(st, 'Este navegador não permite escolher a saída de áudio. Use um Chrome ou Edge atualizado.', 'err');
+  const st = $('micStatus'), sel = $('outSel');
+  let outs = null;
+  try{ outs = await listOutputs(); }catch(e){}
+  if(!outs || !outs.length){
+    setStatus(st, 'Não encontrei nenhuma saída de áudio. Use o Chrome ou o Edge no PC.', 'err');
     return;
   }
-  try{
-    const d = await navigator.mediaDevices.selectAudioOutput();
-    outId = d.deviceId;
-    outLabel = d.label || '';
-    try{ localStorage.setItem('outId', outId); localStorage.setItem('outLabel', outLabel); }catch(e){}
-    $('pickOut').textContent = outButtonText();
-    await applyOut();
-  }catch(e){
-    setStatus(st, 'Nenhuma saída foi escolhida.', 'err');
+  sel.innerHTML = '';
+  const ph = document.createElement('option');
+  ph.value = ''; ph.textContent = 'Escolha a saída...';
+  sel.appendChild(ph);
+  outs.forEach((d, i) => {
+    const o = document.createElement('option');
+    o.value = d.deviceId; o.textContent = d.label || ('Saída ' + (i + 1));
+    sel.appendChild(o);
+  });
+  sel.hidden = false;
+  const cable = outs.find(d => /cable input/i.test(d.label));
+  const saved = outs.find(d => d.deviceId === outId);
+  const auto = cable || saved;
+  if(auto){
+    sel.value = auto.deviceId;
+    await chooseOut(auto.deviceId, auto.label);
+  }else{
+    setStatus(st, 'Não achei o CABLE Input. Escolha a saída na lista (se você ainda não instalou o driver, instale e reinicie o PC).', 'warn');
   }
 }
+$('outSel').onchange = () => {
+  const o = $('outSel').selectedOptions[0];
+  if(o && o.value) chooseOut(o.value, o.textContent);
+};
 $('pickOut').onclick = pickOut;
 
 function onMicStream(stream){
