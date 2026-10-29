@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Áudio do PC no celular</title>
+<title>Áudio PC e celular</title>
 <style>
-  :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--fg:#eef0f4;--mut:#9aa3b2;--acc:#0a84ff;--ok:#30d158;--err:#ff453a}
+  :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--fg:#eef0f4;--mut:#9aa3b2;--acc:#0a84ff;--ok:#30d158;--err:#ff453a;--warn:#ffd60a}
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);
        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -20,23 +20,27 @@
   .tabs{display:flex;gap:8px}
   button{font:inherit;font-size:17px;padding:14px 18px;border-radius:12px;border:1px solid var(--line);
          background:transparent;color:var(--fg);cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
   .tabs button{flex:1;padding:10px;font-size:15px}
   .tabs button.on{background:var(--acc);border-color:var(--acc)}
   button.primary{background:var(--acc);border-color:var(--acc);font-weight:600}
-  input{font:inherit;font-size:28px;letter-spacing:6px;text-align:center;text-transform:lowercase;
+  #codeIn{font:inherit;font-size:28px;letter-spacing:6px;text-align:center;text-transform:lowercase;
         padding:12px;border-radius:12px;border:1px solid var(--line);background:#0f1115;color:var(--fg);width:100%}
+  .opt{display:flex;align-items:center;gap:10px;font-size:15px;color:var(--fg);cursor:pointer}
+  .opt input{width:20px;height:20px;flex:none;accent-color:var(--acc)}
+  .sub{border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:12px}
   .code{font-size:40px;font-weight:700;letter-spacing:8px;text-align:center;padding:14px;
         border-radius:12px;background:#0f1115;border:1px dashed var(--line);user-select:all}
   .meter{height:10px;border-radius:6px;background:#0f1115;border:1px solid var(--line);overflow:hidden}
   .meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .08s}
   .status{font-size:14px;min-height:20px;color:var(--mut)}
-  .status.ok{color:var(--ok)} .status.err{color:var(--err)}
+  .status.ok{color:var(--ok)} .status.err{color:var(--err)} .status.warn{color:var(--warn)}
   .foot{font-size:13px}
 </style>
 </head>
 <body>
 <div class="card">
-  <h1>Áudio do PC no celular</h1>
+  <h1>Áudio PC e celular</h1>
   <div class="tabs">
     <button id="tPc">Estou no PC</button>
     <button id="tPh">Estou no celular</button>
@@ -50,15 +54,26 @@
       <div class="code" id="code">······</div>
       <p>Nível do áudio capturado:</p>
       <div class="meter"><i id="lvl"></i></div>
+
+      <div class="sub">
+        <p><b>Microfone do celular</b> (opcional). Para o Discord, OBS, jogos etc. enxergarem o celular como microfone, instale o <b>VB-Audio Virtual Cable</b> (grátis), escolha abaixo a saída <b>CABLE Input</b> e, no programa, selecione <b>CABLE Output</b> como microfone.</p>
+        <div class="meter"><i id="micLvl"></i></div>
+        <button id="pickOut">Escolher saída do microfone</button>
+        <div class="status" id="micStatus"></div>
+      </div>
+
       <button id="stopPc">Parar</button>
     </div>
     <div class="status" id="pcStatus"></div>
+    <audio id="micAud" autoplay playsinline muted></audio>
   </section>
 
   <section id="phone" hidden>
     <p>Abra esta mesma página no navegador do celular (Safari no iPhone, Chrome no Android), digite o código que aparece no PC e toque em Conectar.</p>
     <input id="codeIn" maxlength="6" placeholder="código" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <label class="opt"><input type="checkbox" id="useMic"> Usar o celular como microfone do PC</label>
     <button class="primary" id="go">Conectar</button>
+    <button id="muteMic" hidden>Silenciar microfone</button>
     <button id="leave" hidden>Desconectar</button>
     <button id="tapPlay" hidden>Toque para ouvir</button>
     <audio id="aud" playsinline></audio>
@@ -66,6 +81,7 @@
   </section>
 
   <p class="foot">Para ir pelo cabo USB: no iPhone, conecte o cabo e ative Ajustes → Acesso Pessoal → Permitir Acesso a Outros; no Android, ative Tethering USB. O PC passa a usar a rede do celular e o áudio segue por ela. Também funciona no mesmo Wi-Fi. Os dois aparelhos precisam de internet só para o pareamento.</p>
+  <p class="foot">Microfone: o celular precisa abrir esta página por <b>https</b> (em http o navegador bloqueia o microfone). Ele só é ligado ao tocar em Conectar; para ligar depois, desconecte e conecte de novo. Use fones no celular para não dar eco, e lembre que no iPhone o volume e a qualidade do áudio podem mudar enquanto o microfone está ativo.</p>
 </div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -102,36 +118,119 @@ function lowLatency(call){
   }catch(e){}
 }
 
+// Medidor de nivel: desenha o volume do stream na barra e devolve uma funcao para parar
+function makeMeter(stream, bar){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ctx.createMediaStreamSource(stream);
+    const an = ctx.createAnalyser(); an.fftSize = 512;
+    src.connect(an); // nao liga ao destino: so mede, nao toca
+    const buf = new Uint8Array(an.fftSize);
+    let alive = true;
+    (function loop(){
+      if(!alive) return;
+      an.getByteTimeDomainData(buf);
+      let m = 0; for(const v of buf) m = Math.max(m, Math.abs(v - 128));
+      bar.style.width = Math.min(100, m / 128 * 140) + '%';
+      requestAnimationFrame(loop);
+    })();
+    return () => { alive = false; bar.style.width = '0'; ctx.close().catch(() => {}); };
+  }catch(e){
+    return () => {};
+  }
+}
+
 /* ---------------- LADO PC ---------------- */
-let pcPeer = null, capStream = null, actx = null;
+let pcPeer = null, capStream = null, curCall = null;
+let stopPcMeter = null, stopMicMeter = null;
+let outId = null, outLabel = '';
+
+try{
+  outId = localStorage.getItem('outId') || null;
+  outLabel = localStorage.getItem('outLabel') || '';
+}catch(e){}
+function outButtonText(){
+  return outId ? 'Saída: ' + (outLabel || 'escolhida') + ' (trocar)' : 'Escolher saída do microfone';
+}
+$('pickOut').textContent = outButtonText();
 
 function genCode(){
   const a = crypto.getRandomValues(new Uint8Array(6));
   return Array.from(a, x => ALPHABET[x % ALPHABET.length]).join('');
 }
 
-function startMeter(stream){
+// Toca o microfone do celular na saida escolhida (ideal: CABLE Input).
+// Fica mudo enquanto nenhuma saida for escolhida, para o som nao voltar ao celular.
+async function applyOut(){
+  const a = $('micAud'), st = $('micStatus'), has = !!a.srcObject;
+  if(!outId){
+    a.muted = true;
+    if(has) setStatus(st, 'Recebendo o microfone do celular, mas sem saída escolhida (mudo, para não dar eco). Escolha a saída acima.', 'warn');
+    return;
+  }
+  if(!('setSinkId' in a)){
+    a.muted = true;
+    setStatus(st, 'Este navegador não permite escolher a saída de áudio. Use o Chrome ou o Edge.', 'err');
+    return;
+  }
   try{
-    actx = new (window.AudioContext || window.webkitAudioContext)();
-    const src = actx.createMediaStreamSource(stream);
-    const an = actx.createAnalyser(); an.fftSize = 512;
-    src.connect(an);
-    const buf = new Uint8Array(an.fftSize);
-    (function loop(){
-      if(!actx) return;
-      an.getByteTimeDomainData(buf);
-      let m = 0; for(const v of buf) m = Math.max(m, Math.abs(v - 128));
-      $('lvl').style.width = Math.min(100, m / 128 * 140) + '%';
-      requestAnimationFrame(loop);
-    })();
-  }catch(e){}
+    await a.setSinkId(outId);
+    a.muted = false;
+    a.play().catch(() => {});
+    const name = outLabel || 'saída escolhida';
+    if(has){
+      const virtual = /cable|virtual|vb-audio|voicemeeter|blackhole/i.test(outLabel);
+      setStatus(st,
+        virtual ? 'Microfone do celular saindo em "' + name + '".'
+                : 'Microfone saindo em "' + name + '". Se não for um cabo virtual, esse som pode ser capturado e voltar para o celular.',
+        virtual ? 'ok' : 'warn');
+    }else{
+      setStatus(st, 'Saída escolhida: ' + name + '. Aguardando o microfone do celular...', '');
+    }
+  }catch(e){
+    a.muted = true;
+    setStatus(st, 'Não consegui usar essa saída. Escolha de novo.', 'err');
+  }
+}
+
+async function pickOut(){
+  const st = $('micStatus');
+  if(!navigator.mediaDevices || !navigator.mediaDevices.selectAudioOutput){
+    setStatus(st, 'Este navegador não permite escolher a saída de áudio. Use um Chrome ou Edge atualizado.', 'err');
+    return;
+  }
+  try{
+    const d = await navigator.mediaDevices.selectAudioOutput();
+    outId = d.deviceId;
+    outLabel = d.label || '';
+    try{ localStorage.setItem('outId', outId); localStorage.setItem('outLabel', outLabel); }catch(e){}
+    $('pickOut').textContent = outButtonText();
+    await applyOut();
+  }catch(e){
+    setStatus(st, 'Nenhuma saída foi escolhida.', 'err');
+  }
+}
+$('pickOut').onclick = pickOut;
+
+function onMicStream(stream){
+  $('micAud').srcObject = stream;
+  if(stopMicMeter) stopMicMeter();
+  stopMicMeter = makeMeter(stream, $('micLvl'));
+  applyOut();
+}
+function micGone(){
+  if(stopMicMeter){ stopMicMeter(); stopMicMeter = null; }
+  $('micAud').srcObject = null;
+  $('micAud').muted = true;
+  setStatus($('micStatus'), '', '');
 }
 
 function stopPc(msg){
   if(capStream){ capStream.getTracks().forEach(t => { t.onended = null; t.stop(); }); capStream = null; }
+  if(curCall){ try{ curCall.close(); }catch(e){} curCall = null; }
   if(pcPeer){ pcPeer.destroy(); pcPeer = null; }
-  if(actx){ actx.close(); actx = null; }
-  $('lvl').style.width = '0';
+  if(stopPcMeter){ stopPcMeter(); stopPcMeter = null; }
+  micGone();
   $('pcInfo').hidden = true;
   $('startPc').hidden = false;
   setStatus($('pcStatus'), msg || '', '');
@@ -164,7 +263,7 @@ async function startPc(){
   capStream = s;
   const audioOnly = new MediaStream(at);
   s.getTracks().forEach(t => t.onended = () => stopPc('O compartilhamento foi encerrado.'));
-  startMeter(audioOnly);
+  stopPcMeter = makeMeter(audioOnly, $('lvl'));
   openPeer(audioOnly);
 }
 $('startPc').onclick = startPc;
@@ -182,8 +281,15 @@ function openPeer(audioOnly, tries = 0){
   peer.on('connection', conn => {
     conn.on('open', () => {
       setStatus($('pcStatus'), 'Celular conectado, enviando áudio...', 'ok');
+      if(curCall){ try{ curCall.close(); }catch(e){} curCall = null; }
       const call = peer.call(conn.peer, audioOnly, { sdpTransform: tune });
-      call.on('close', () => setStatus($('pcStatus'), 'O celular desconectou. Aguardando de novo...', ''));
+      curCall = call;
+      // se o celular enviar o microfone, ele chega aqui
+      call.on('stream', onMicStream);
+      call.on('close', () => {
+        if(curCall === call){ curCall = null; micGone(); }
+        setStatus($('pcStatus'), 'O celular desconectou. Aguardando de novo...', '');
+      });
       call.on('error', e => setStatus($('pcStatus'), 'Erro na chamada: ' + e, 'err'));
     });
     conn.on('close', () => setStatus($('pcStatus'), 'O celular desconectou. Aguardando de novo...', ''));
@@ -196,7 +302,7 @@ function openPeer(audioOnly, tries = 0){
 }
 
 /* ---------------- LADO IPHONE ---------------- */
-let phPeer = null, wake = null;
+let phPeer = null, wake = null, micStream = null;
 
 async function keepAwake(){
   try{ if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); }catch(e){}
@@ -217,33 +323,62 @@ $('tapPlay').onclick = playAudio;
 function disconnectPhone(msg, kind){
   if(phPeer){ const p = phPeer; phPeer = null; p.destroy(); }
   const a = $('aud'); a.pause(); a.srcObject = null;
+  if(micStream){ micStream.getTracks().forEach(t => t.stop()); micStream = null; }
   if(wake){ wake.release().catch(() => {}); wake = null; }
   $('tapPlay').hidden = true;
   $('leave').hidden = true;
+  $('muteMic').hidden = true;
+  $('muteMic').textContent = 'Silenciar microfone';
   $('go').hidden = false;
   $('codeIn').disabled = false;
+  $('useMic').disabled = false;
   setStatus($('phStatus'), msg || 'Desconectado.', kind || '');
 }
 
-function connectPhone(){
+async function connectPhone(){
+  if($('go').hidden || $('go').disabled) return;
   const code = $('codeIn').value.trim().toLowerCase();
   if(code.length < 6){ setStatus($('phStatus'), 'Digite o código de 6 caracteres que aparece no PC.', 'err'); return; }
   if(phPeer){ const old = phPeer; phPeer = null; old.destroy(); }
+
+  // microfone: precisa ser pedido aqui, logo apos o toque, e antes de atender a chamada
+  micStream = null;
+  if($('useMic').checked){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      setStatus($('phStatus'), 'Para usar o microfone, abra esta página por https. Em http o navegador do celular bloqueia o microfone.', 'err');
+      return;
+    }
+    $('go').disabled = true;
+    setStatus($('phStatus'), 'Pedindo acesso ao microfone...', '');
+    try{
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+    }catch(e){
+      $('go').disabled = false;
+      setStatus($('phStatus'), 'Sem acesso ao microfone. Permita o microfone nesta página ou desmarque a opção.', 'err');
+      return;
+    }
+    $('go').disabled = false;
+  }
+
   setStatus($('phStatus'), 'Conectando...', '');
   $('go').hidden = true;
   $('leave').hidden = false;
   $('codeIn').disabled = true;
+  $('useMic').disabled = true;
+  $('muteMic').hidden = !micStream;
   keepAwake();
   const peer = new Peer();
   phPeer = peer;
   const gone = (msg, kind) => { if(phPeer === peer) disconnectPhone(msg, kind); };
   peer.on('open', () => {
     const conn = peer.connect(PREFIX + code, { reliable: true });
-    conn.on('open', () => setStatus($('phStatus'), 'Conectado ao PC, aguardando o áudio...', 'ok'));
+    conn.on('open', () => setStatus($('phStatus'), micStream ? 'Conectado ao PC (microfone ligado), aguardando o áudio...' : 'Conectado ao PC, aguardando o áudio...', 'ok'));
     conn.on('close', () => gone('O PC desconectou.', 'err'));
   });
   peer.on('call', call => {
-    call.answer(undefined, { sdpTransform: tune });
+    call.answer(micStream || undefined, { sdpTransform: tune });
     call.on('stream', stream => { $('aud').srcObject = stream; lowLatency(call); playAudio(); });
     call.on('close', () => gone('O áudio foi encerrado no PC.', 'err'));
   });
@@ -256,6 +391,12 @@ function connectPhone(){
 }
 $('go').onclick = connectPhone;
 $('leave').onclick = () => disconnectPhone('Desconectado.', '');
+$('muteMic').onclick = () => {
+  const t = micStream && micStream.getAudioTracks()[0];
+  if(!t) return;
+  t.enabled = !t.enabled;
+  $('muteMic').textContent = t.enabled ? 'Silenciar microfone' : 'Ativar microfone';
+};
 $('codeIn').addEventListener('keydown', e => { if(e.key === 'Enter') connectPhone(); });
 
 /* ---------------- INICIO ---------------- */
