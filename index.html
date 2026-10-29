@@ -36,6 +36,11 @@
   .status{font-size:14px;min-height:20px;color:var(--mut)}
   .status.ok{color:var(--ok)} .status.err{color:var(--err)} .status.warn{color:var(--warn)}
   .foot{font-size:13px}
+  a.btn{display:block;text-align:center;text-decoration:none;font-size:16px;padding:12px;border-radius:12px;
+        border:1px solid var(--acc);color:var(--fg)}
+  details{color:var(--mut);font-size:14px;line-height:1.5}
+  summary{cursor:pointer;color:var(--fg)}
+  ol{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
 </style>
 </head>
 <body>
@@ -56,7 +61,18 @@
       <div class="meter"><i id="lvl"></i></div>
 
       <div class="sub">
-        <p><b>Microfone do celular</b> (opcional). Para o Discord, OBS, jogos etc. enxergarem o celular como microfone, instale o <b>VB-Audio Virtual Cable</b> (grátis), escolha abaixo a saída <b>CABLE Input</b> e, no programa, selecione <b>CABLE Output</b> como microfone.</p>
+        <p><b>Microfone do celular</b> (opcional). Para o Discord, OBS, jogos etc. enxergarem o celular como microfone, o Windows precisa de um driver de áudio virtual. Um site não consegue instalar isso sozinho, então baixe o <b>VB-Audio Virtual Cable</b> (grátis) uma única vez:</p>
+        <button class="primary" id="dlDriver">Baixar instalador do driver (.bat)</button>
+        <p class="foot">Ele baixa o VB-Cable direto do site oficial e abre o instalador. Prefere fazer à mão? Use a <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener" style="color:var(--acc)">página oficial</a>. O VB-Cable é donationware: se gostar, apoie o autor.</p>
+        <details>
+          <summary>Passo a passo depois de baixar</summary>
+          <ol>
+            <li>Abra o <b>Instalar-VB-Cable.bat</b> baixado. Se o Windows avisar que protegeu o PC, clique em Mais informações e Executar assim mesmo. O arquivo é só texto, dá para conferir no Bloco de Notas.</li>
+            <li>Confirme o aviso de administrador, clique em <b>Install Driver</b> e <b>reinicie o PC</b>.</li>
+            <li>Volte aqui, conecte o celular com o microfone marcado e clique em <b>Escolher saída do microfone</b> e depois em <b>CABLE Input</b>.</li>
+            <li>No Discord: Configurações → Voz e vídeo → Dispositivo de entrada → <b>CABLE Output</b>.</li>
+          </ol>
+        </details>
         <div class="meter"><i id="micLvl"></i></div>
         <button id="pickOut">Escolher saída do microfone</button>
         <div class="status" id="micStatus"></div>
@@ -398,6 +414,31 @@ $('muteMic').onclick = () => {
   $('muteMic').textContent = t.enabled ? 'Silenciar microfone' : 'Ativar microfone';
 };
 $('codeIn').addEventListener('keydown', e => { if(e.key === 'Enter') connectPhone(); });
+
+// Gera o instalador do driver: baixa o VB-Cable do site oficial e abre o instalador
+const BAT = [
+  '@echo off',
+  'set "D=%TEMP%\\vbcable"',
+  'mkdir "%D%" 2>nul',
+  'echo Baixando o VB-Cable do site oficial da VB-Audio...',
+  'powershell -NoProfile -Command "Invoke-WebRequest \'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip\' -OutFile \'%D%\\vbcable.zip\'"',
+  'powershell -NoProfile -Command "Expand-Archive -Force \'%D%\\vbcable.zip\' \'%D%\'"',
+  'echo.',
+  'echo Abrindo o instalador. Clique em Install Driver e depois reinicie o PC.',
+  'powershell -NoProfile -Command "$s=(Get-ChildItem \'%D%\' -Recurse -Filter VBCABLE_Setup_x64.exe | Select-Object -First 1).FullName; Start-Process $s -Verb RunAs -Wait"',
+  'echo.',
+  'echo Terminado. Reinicie o PC para o driver aparecer.',
+  'pause'
+];
+$('dlDriver').onclick = () => {
+  const blob = new Blob([BAT.join('\r\n') + '\r\n'], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'Instalar-VB-Cable.bat';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  setStatus($('micStatus'), 'Baixado. Abra o Instalar-VB-Cable.bat e siga o passo a passo abaixo.', 'ok');
+};
 
 /* ---------------- INICIO ---------------- */
 const q = new URLSearchParams(location.search).get('c');
