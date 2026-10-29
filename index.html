@@ -61,18 +61,24 @@
       <div class="meter"><i id="lvl"></i></div>
 
       <div class="sub">
-        <p><b>Microfone do celular</b> (opcional). Para o Discord, OBS, jogos etc. enxergarem o celular como microfone, o Windows precisa de um driver de áudio virtual. Um site não consegue instalar isso sozinho, então baixe o <b>VB-Audio Virtual Cable</b> (grátis) uma única vez:</p>
+        <p><b>Microfone do celular</b> (opcional). Para o Discord, OBS, jogos etc. enxergarem o celular como microfone, o Windows precisa de um driver de áudio virtual. Um site não consegue instalar isso sozinho, então instale o <b>VB-Audio Virtual Cable</b> (grátis) uma única vez:</p>
         <button class="primary" id="dlDriver">Baixar instalador do driver (.bat)</button>
-        <p class="foot">Ele baixa o VB-Cable direto do site oficial e abre o instalador. Prefere fazer à mão? Use a <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener" style="color:var(--acc)">página oficial</a>. O VB-Cable é donationware: se gostar, apoie o autor.</p>
+        <ol>
+          <li>Dê dois cliques no arquivo baixado. Se aparecer "O Windows protegeu o PC", clique em <b>Mais informações</b> e depois em <b>Executar assim mesmo</b>.</li>
+          <li>Confirme o aviso de administrador, clique em <b>Install Driver</b> e <b>reinicie o PC</b>.</li>
+          <li>Volte aqui, conecte o celular com o microfone marcado, clique em <b>Escolher saída do microfone</b> e depois em <b>CABLE Input</b>.</li>
+          <li>No Discord: Configurações → Voz e vídeo → Dispositivo de entrada → <b>CABLE Output</b>.</li>
+        </ol>
         <details>
-          <summary>Passo a passo depois de baixar</summary>
+          <summary>O Windows bloqueou o arquivo?</summary>
           <ol>
-            <li>Abra o <b>Instalar-VB-Cable.bat</b> baixado. Se o Windows avisar que protegeu o PC, clique em Mais informações e Executar assim mesmo. O arquivo é só texto, dá para conferir no Bloco de Notas.</li>
-            <li>Confirme o aviso de administrador, clique em <b>Install Driver</b> e <b>reinicie o PC</b>.</li>
-            <li>Volte aqui, conecte o celular com o microfone marcado e clique em <b>Escolher saída do microfone</b> e depois em <b>CABLE Input</b>.</li>
-            <li>No Discord: Configurações → Voz e vídeo → Dispositivo de entrada → <b>CABLE Output</b>.</li>
+            <li><b>Jeito rápido:</b> clique com o botão direito no arquivo baixado, vá em <b>Propriedades</b>, marque <b>Desbloquear</b> (embaixo, ao lado de "Segurança"), clique em <b>OK</b> e abra o arquivo de novo.</li>
+            <li><b>Sem arquivo:</b> <button id="copyCmd" style="font-size:14px;padding:6px 10px;margin:4px 0">Copiar comando</button> e depois aperte <b>Windows + R</b>, digite <b>powershell</b>, Enter, cole com <b>Ctrl + V</b> e Enter. O comando só baixa o VB-Cable do site oficial e abre o instalador.</li>
+            <li>Ou baixe na <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener" style="color:var(--acc)">página oficial</a> e execute o <b>VBCABLE_Setup_x64.exe</b> como administrador.</li>
           </ol>
+          <textarea id="cmdBox" readonly rows="5" style="width:100%;margin-top:8px;font:12px/1.4 Consolas,monospace;background:#0f1115;color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:8px"></textarea>
         </details>
+        <p class="foot">O VB-Cable é donationware: se gostar, apoie o autor.</p>
         <div class="meter"><i id="micLvl"></i></div>
         <button id="pickOut">Escolher saída do microfone</button>
         <div class="status" id="micStatus"></div>
@@ -421,7 +427,7 @@ const BAT = [
   'set "D=%TEMP%\\vbcable"',
   'mkdir "%D%" 2>nul',
   'echo Baixando o VB-Cable do site oficial da VB-Audio...',
-  'powershell -NoProfile -Command "Invoke-WebRequest \'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip\' -OutFile \'%D%\\vbcable.zip\'"',
+  'powershell -NoProfile -Command "try{Invoke-WebRequest \'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip\' -OutFile \'%D%\\vbcable.zip\'}catch{Invoke-WebRequest \'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip\' -OutFile \'%D%\\vbcable.zip\'}"',
   'powershell -NoProfile -Command "Expand-Archive -Force \'%D%\\vbcable.zip\' \'%D%\'"',
   'echo.',
   'echo Abrindo o instalador. Clique em Install Driver e depois reinicie o PC.',
@@ -430,6 +436,32 @@ const BAT = [
   'echo Terminado. Reinicie o PC para o driver aparecer.',
   'pause'
 ];
+// Comando de uma linha: colado no PowerShell, não recebe a marca de "baixado da internet", então o Windows não bloqueia
+const PS_CMD = [
+  "$ProgressPreference='SilentlyContinue'",
+  String.raw`$d="$env:TEMP\vbcable"`,
+  "New-Item $d -ItemType Directory -Force | Out-Null",
+  "Write-Host 'Baixando o VB-Cable do site oficial...'",
+  String.raw`try{Invoke-WebRequest 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip' -OutFile "$d\vbcable.zip"}catch{Invoke-WebRequest 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip' -OutFile "$d\vbcable.zip"}`,
+  String.raw`Expand-Archive "$d\vbcable.zip" $d -Force`,
+  "$s=(Get-ChildItem $d -Recurse -Filter VBCABLE_Setup_x64.exe | Select-Object -First 1).FullName",
+  "Write-Host 'Abrindo o instalador: clique em Install Driver e depois reinicie o PC.'",
+  "Start-Process $s -Verb RunAs -Wait"
+].join('; ');
+$('cmdBox').value = PS_CMD;
+$('copyCmd').onclick = async () => {
+  let ok = false;
+  try{ await navigator.clipboard.writeText(PS_CMD); ok = true; }catch(e){}
+  if(!ok){
+    const box = $('cmdBox'); box.closest('details').open = true; box.select();
+    try{ ok = document.execCommand('copy'); }catch(e){}
+  }
+  setStatus($('micStatus'),
+    ok ? 'Comando copiado. Agora: Windows + R, digite powershell, Enter, Ctrl + V e Enter.'
+       : 'Não consegui copiar sozinho. Selecione o texto em "Ver o que o comando faz" e copie (Ctrl + C).',
+    ok ? 'ok' : 'warn');
+};
+
 $('dlDriver').onclick = () => {
   const blob = new Blob([BAT.join('\r\n') + '\r\n'], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
@@ -437,7 +469,7 @@ $('dlDriver').onclick = () => {
   a.href = url; a.download = 'Instalar-VB-Cable.bat';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
-  setStatus($('micStatus'), 'Baixado. Abra o Instalar-VB-Cable.bat e siga o passo a passo abaixo.', 'ok');
+  setStatus($('micStatus'), 'Baixado. Se o Windows bloquear, clique com o botão direito no arquivo > Propriedades > Desbloquear.', 'ok');
 };
 
 /* ---------------- INICIO ---------------- */
