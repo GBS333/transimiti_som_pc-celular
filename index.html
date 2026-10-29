@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Áudio do PC no iPhone</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--fg:#eef0f4;--mut:#9aa3b2;--acc:#0a84ff;--ok:#30d158;--err:#ff453a}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       display:flex;align-items:center;justify-content:center;padding:16px}
+  .card{width:100%;max-width:440px;background:var(--card);border:1px solid var(--line);
+        border-radius:20px;padding:24px;display:flex;flex-direction:column;gap:16px}
+  h1{font-size:22px;margin:0}
+  p{margin:0;color:var(--mut);line-height:1.45;font-size:15px}
+  b{color:var(--fg)}
+  section{display:flex;flex-direction:column;gap:14px}
+  [hidden]{display:none!important}
+  .tabs{display:flex;gap:8px}
+  button{font:inherit;font-size:17px;padding:14px 18px;border-radius:12px;border:1px solid var(--line);
+         background:transparent;color:var(--fg);cursor:pointer}
+  .tabs button{flex:1;padding:10px;font-size:15px}
+  .tabs button.on{background:var(--acc);border-color:var(--acc)}
+  button.primary{background:var(--acc);border-color:var(--acc);font-weight:600}
+  input{font:inherit;font-size:28px;letter-spacing:6px;text-align:center;text-transform:lowercase;
+        padding:12px;border-radius:12px;border:1px solid var(--line);background:#0f1115;color:var(--fg);width:100%}
+  .code{font-size:40px;font-weight:700;letter-spacing:8px;text-align:center;padding:14px;
+        border-radius:12px;background:#0f1115;border:1px dashed var(--line);user-select:all}
+  .meter{height:10px;border-radius:6px;background:#0f1115;border:1px solid var(--line);overflow:hidden}
+  .meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .08s}
+  .status{font-size:14px;min-height:20px;color:var(--mut)}
+  .status.ok{color:var(--ok)} .status.err{color:var(--err)}
+  .foot{font-size:13px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Áudio do PC no iPhone</h1>
+  <div class="tabs">
+    <button id="tPc">Estou no PC</button>
+    <button id="tPh">Estou no iPhone</button>
+  </div>
+
+  <section id="pc">
+    <p>Abra esta página no <b>Chrome ou Edge</b> do PC e clique no botão. Na janela que abrir, escolha <b>Tela inteira</b> e marque <b>Compartilhar áudio do sistema</b>.</p>
+    <button class="primary" id="startPc">Compartilhar áudio do PC</button>
+    <div id="pcInfo" hidden>
+      <p>Digite este código no iPhone:</p>
+      <div class="code" id="code">······</div>
+      <p>Nível do áudio capturado:</p>
+      <div class="meter"><i id="lvl"></i></div>
+      <button id="stopPc">Parar</button>
+    </div>
+    <div class="status" id="pcStatus"></div>
+  </section>
+
+  <section id="phone" hidden>
+    <p>Abra esta mesma página no <b>Safari</b> do iPhone, digite o código que aparece no PC e toque em Conectar.</p>
+    <input id="codeIn" maxlength="6" placeholder="código" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <button class="primary" id="go">Conectar</button>
+    <button id="tapPlay" hidden>Toque para ouvir</button>
+    <audio id="aud" playsinline></audio>
+    <div class="status" id="phStatus"></div>
+  </section>
+
+  <p class="foot">Para ir pelo cabo USB: conecte o iPhone, ative Ajustes → Acesso Pessoal → Permitir Acesso a Outros. O PC passa a usar a rede do iPhone e o áudio segue por ela. Também funciona no mesmo Wi-Fi. Os dois aparelhos precisam de internet só para o pareamento.</p>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const PREFIX = 'pc2iphone-';
+const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
+
+function show(which){
+  $('pc').hidden = which !== 'pc';
+  $('phone').hidden = which !== 'phone';
+  $('tPc').classList.toggle('on', which === 'pc');
+  $('tPh').classList.toggle('on', which === 'phone');
+}
+$('tPc').onclick = () => show('pc');
+$('tPh').onclick = () => show('phone');
+
+function setStatus(el, text, kind){ el.textContent = text; el.className = 'status' + (kind ? ' ' + kind : ''); }
+
+// Pede audio estereo de alta qualidade na negociacao (melhor para musica)
+function tune(sdp){
+  return sdp.replace(/(a=fmtp:\d+ )(minptime=10)/g, '$1stereo=1;sprop-stereo=1;maxaveragebitrate=192000;$2');
+}
+
+/* ---------------- LADO PC ---------------- */
+let pcPeer = null, capStream = null, actx = null;
+
+function genCode(){
+  const a = crypto.getRandomValues(new Uint8Array(6));
+  return Array.from(a, x => ALPHABET[x % ALPHABET.length]).join('');
+}
+
+function startMeter(stream){
+  try{
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = actx.createMediaStreamSource(stream);
+    const an = actx.createAnalyser(); an.fftSize = 512;
+    src.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    (function loop(){
+      if(!actx) return;
+      an.getByteTimeDomainData(buf);
+      let m = 0; for(const v of buf) m = Math.max(m, Math.abs(v - 128));
+      $('lvl').style.width = Math.min(100, m / 128 * 140) + '%';
+      requestAnimationFrame(loop);
+    })();
+  }catch(e){}
+}
+
+function stopPc(msg){
+  if(capStream){ capStream.getTracks().forEach(t => { t.onended = null; t.stop(); }); capStream = null; }
+  if(pcPeer){ pcPeer.destroy(); pcPeer = null; }
+  if(actx){ actx.close(); actx = null; }
+  $('lvl').style.width = '0';
+  $('pcInfo').hidden = true;
+  $('startPc').hidden = false;
+  setStatus($('pcStatus'), msg || '', '');
+}
+$('stopPc').onclick = () => stopPc('Parado.');
+
+async function startPc(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
+    setStatus($('pcStatus'), 'Este navegador não consegue capturar o áudio. Use o Chrome ou o Edge no PC (abrindo por https ou pelo arquivo local).', 'err');
+    return;
+  }
+  setStatus($('pcStatus'), 'Escolha a tela e marque "Compartilhar áudio do sistema"...', '');
+  let s;
+  try{
+    s = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      systemAudio: 'include'
+    });
+  }catch(e){
+    setStatus($('pcStatus'), 'Compartilhamento cancelado ou não permitido.', 'err');
+    return;
+  }
+  const at = s.getAudioTracks();
+  if(!at.length){
+    s.getTracks().forEach(t => t.stop());
+    setStatus($('pcStatus'), 'Nenhum áudio foi compartilhado. Tente de novo escolhendo "Tela inteira" e marcando "Compartilhar áudio do sistema".', 'err');
+    return;
+  }
+  capStream = s;
+  const audioOnly = new MediaStream(at);
+  s.getTracks().forEach(t => t.onended = () => stopPc('O compartilhamento foi encerrado.'));
+  startMeter(audioOnly);
+  openPeer(audioOnly);
+}
+$('startPc').onclick = startPc;
+
+function openPeer(audioOnly, tries = 0){
+  const code = genCode();
+  const peer = new Peer(PREFIX + code);
+  pcPeer = peer;
+  peer.on('open', () => {
+    $('code').textContent = code;
+    $('pcInfo').hidden = false;
+    $('startPc').hidden = true;
+    setStatus($('pcStatus'), 'Aguardando o iPhone...', '');
+  });
+  peer.on('connection', conn => {
+    conn.on('open', () => {
+      setStatus($('pcStatus'), 'iPhone conectado, enviando áudio...', 'ok');
+      const call = peer.call(conn.peer, audioOnly, { sdpTransform: tune });
+      call.on('close', () => setStatus($('pcStatus'), 'O iPhone desconectou. Aguardando de novo...', ''));
+      call.on('error', e => setStatus($('pcStatus'), 'Erro na chamada: ' + e, 'err'));
+    });
+    conn.on('close', () => setStatus($('pcStatus'), 'O iPhone desconectou. Aguardando de novo...', ''));
+  });
+  peer.on('error', e => {
+    if(e.type === 'unavailable-id' && tries < 3){ peer.destroy(); openPeer(audioOnly, tries + 1); return; }
+    setStatus($('pcStatus'), 'Erro de conexão (' + e.type + '). Confira a internet e tente de novo.', 'err');
+  });
+  peer.on('disconnected', () => { if(!peer.destroyed) peer.reconnect(); });
+}
+
+/* ---------------- LADO IPHONE ---------------- */
+let phPeer = null, wake = null;
+
+async function keepAwake(){
+  try{ if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); }catch(e){}
+}
+
+function playAudio(){
+  const a = $('aud');
+  a.play().then(() => {
+    $('tapPlay').hidden = true;
+    setStatus($('phStatus'), 'Tocando o áudio do PC.', 'ok');
+  }).catch(() => {
+    $('tapPlay').hidden = false;
+    setStatus($('phStatus'), 'Toque em "Toque para ouvir".', '');
+  });
+}
+$('tapPlay').onclick = playAudio;
+
+function connectPhone(){
+  const code = $('codeIn').value.trim().toLowerCase();
+  if(code.length < 6){ setStatus($('phStatus'), 'Digite o código de 6 caracteres que aparece no PC.', 'err'); return; }
+  if(phPeer){ phPeer.destroy(); phPeer = null; }
+  setStatus($('phStatus'), 'Conectando...', '');
+  keepAwake();
+  const peer = new Peer();
+  phPeer = peer;
+  peer.on('open', () => {
+    const conn = peer.connect(PREFIX + code, { reliable: true });
+    conn.on('open', () => setStatus($('phStatus'), 'Conectado ao PC, aguardando o áudio...', 'ok'));
+    conn.on('close', () => setStatus($('phStatus'), 'O PC desconectou.', 'err'));
+  });
+  peer.on('call', call => {
+    call.answer(undefined, { sdpTransform: tune });
+    call.on('stream', stream => { $('aud').srcObject = stream; playAudio(); });
+    call.on('close', () => setStatus($('phStatus'), 'O áudio foi encerrado no PC.', 'err'));
+  });
+  peer.on('error', e => {
+    const msg = e.type === 'peer-unavailable'
+      ? 'Código não encontrado. Confira se o PC ainda está compartilhando.'
+      : 'Erro de conexão (' + e.type + ').';
+    setStatus($('phStatus'), msg, 'err');
+  });
+}
+$('go').onclick = connectPhone;
+$('codeIn').addEventListener('keydown', e => { if(e.key === 'Enter') connectPhone(); });
+
+/* ---------------- INICIO ---------------- */
+const q = new URLSearchParams(location.search).get('c');
+if(q) $('codeIn').value = q;
+show(q || /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'phone' : 'pc');
+</script>
+</body>
+</html>
