@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Áudio do PC no iPhone</title>
+<title>Áudio do PC no celular</title>
 <style>
   :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--fg:#eef0f4;--mut:#9aa3b2;--acc:#0a84ff;--ok:#30d158;--err:#ff453a}
   *{box-sizing:border-box}
@@ -36,17 +36,17 @@
 </head>
 <body>
 <div class="card">
-  <h1>Áudio do PC no iPhone</h1>
+  <h1>Áudio do PC no celular</h1>
   <div class="tabs">
     <button id="tPc">Estou no PC</button>
-    <button id="tPh">Estou no iPhone</button>
+    <button id="tPh">Estou no celular</button>
   </div>
 
   <section id="pc">
     <p>Abra esta página no <b>Chrome ou Edge</b> do PC e clique no botão. Na janela que abrir, escolha <b>Tela inteira</b> e marque <b>Compartilhar áudio do sistema</b>.</p>
     <button class="primary" id="startPc">Compartilhar áudio do PC</button>
     <div id="pcInfo" hidden>
-      <p>Digite este código no iPhone:</p>
+      <p>Digite este código no celular:</p>
       <div class="code" id="code">······</div>
       <p>Nível do áudio capturado:</p>
       <div class="meter"><i id="lvl"></i></div>
@@ -56,7 +56,7 @@
   </section>
 
   <section id="phone" hidden>
-    <p>Abra esta mesma página no <b>Safari</b> do iPhone, digite o código que aparece no PC e toque em Conectar.</p>
+    <p>Abra esta mesma página no navegador do celular (Safari no iPhone, Chrome no Android), digite o código que aparece no PC e toque em Conectar.</p>
     <input id="codeIn" maxlength="6" placeholder="código" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="primary" id="go">Conectar</button>
     <button id="tapPlay" hidden>Toque para ouvir</button>
@@ -64,7 +64,7 @@
     <div class="status" id="phStatus"></div>
   </section>
 
-  <p class="foot">Para ir pelo cabo USB: conecte o iPhone, ative Ajustes → Acesso Pessoal → Permitir Acesso a Outros. O PC passa a usar a rede do iPhone e o áudio segue por ela. Também funciona no mesmo Wi-Fi. Os dois aparelhos precisam de internet só para o pareamento.</p>
+  <p class="foot">Para ir pelo cabo USB: no iPhone, conecte o cabo e ative Ajustes → Acesso Pessoal → Permitir Acesso a Outros; no Android, ative Tethering USB. O PC passa a usar a rede do celular e o áudio segue por ela. Também funciona no mesmo Wi-Fi. Os dois aparelhos precisam de internet só para o pareamento.</p>
 </div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -86,7 +86,19 @@ function setStatus(el, text, kind){ el.textContent = text; el.className = 'statu
 
 // Pede audio estereo de alta qualidade na negociacao (melhor para musica)
 function tune(sdp){
-  return sdp.replace(/(a=fmtp:\d+ )(minptime=10)/g, '$1stereo=1;sprop-stereo=1;maxaveragebitrate=192000;$2');
+  return sdp
+    .replace(/(a=fmtp:\d+ )(minptime=10)/g, '$1stereo=1;sprop-stereo=1;maxaveragebitrate=192000;$2')
+    .replace(/(a=rtpmap:\d+ opus\/48000\/2\r?\n)/g, '$1a=ptime:10\r\n'); // pacotes menores = menos atraso
+}
+
+// Pede ao navegador o menor buffer de reproducao possivel (ignorado se nao suportado)
+function lowLatency(call){
+  try{
+    call.peerConnection.getReceivers().forEach(r => {
+      if('jitterBufferTarget' in r) r.jitterBufferTarget = 0;
+      if('playoutDelayHint' in r) r.playoutDelayHint = 0;
+    });
+  }catch(e){}
 }
 
 /* ---------------- LADO PC ---------------- */
@@ -164,16 +176,16 @@ function openPeer(audioOnly, tries = 0){
     $('code').textContent = code;
     $('pcInfo').hidden = false;
     $('startPc').hidden = true;
-    setStatus($('pcStatus'), 'Aguardando o iPhone...', '');
+    setStatus($('pcStatus'), 'Aguardando o celular...', '');
   });
   peer.on('connection', conn => {
     conn.on('open', () => {
-      setStatus($('pcStatus'), 'iPhone conectado, enviando áudio...', 'ok');
+      setStatus($('pcStatus'), 'Celular conectado, enviando áudio...', 'ok');
       const call = peer.call(conn.peer, audioOnly, { sdpTransform: tune });
-      call.on('close', () => setStatus($('pcStatus'), 'O iPhone desconectou. Aguardando de novo...', ''));
+      call.on('close', () => setStatus($('pcStatus'), 'O celular desconectou. Aguardando de novo...', ''));
       call.on('error', e => setStatus($('pcStatus'), 'Erro na chamada: ' + e, 'err'));
     });
-    conn.on('close', () => setStatus($('pcStatus'), 'O iPhone desconectou. Aguardando de novo...', ''));
+    conn.on('close', () => setStatus($('pcStatus'), 'O celular desconectou. Aguardando de novo...', ''));
   });
   peer.on('error', e => {
     if(e.type === 'unavailable-id' && tries < 3){ peer.destroy(); openPeer(audioOnly, tries + 1); return; }
@@ -216,7 +228,7 @@ function connectPhone(){
   });
   peer.on('call', call => {
     call.answer(undefined, { sdpTransform: tune });
-    call.on('stream', stream => { $('aud').srcObject = stream; playAudio(); });
+    call.on('stream', stream => { $('aud').srcObject = stream; lowLatency(call); playAudio(); });
     call.on('close', () => setStatus($('phStatus'), 'O áudio foi encerrado no PC.', 'err'));
   });
   peer.on('error', e => {
@@ -232,7 +244,7 @@ $('codeIn').addEventListener('keydown', e => { if(e.key === 'Enter') connectPhon
 /* ---------------- INICIO ---------------- */
 const q = new URLSearchParams(location.search).get('c');
 if(q) $('codeIn').value = q;
-show(q || /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'phone' : 'pc');
+show(q || /iPhone|iPad|iPod|Android.*Mobile/i.test(navigator.userAgent) ? 'phone' : 'pc');
 </script>
 </body>
 </html>
