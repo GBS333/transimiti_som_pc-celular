@@ -59,6 +59,7 @@
     <p>Abra esta mesma página no navegador do celular (Safari no iPhone, Chrome no Android), digite o código que aparece no PC e toque em Conectar.</p>
     <input id="codeIn" maxlength="6" placeholder="código" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="primary" id="go">Conectar</button>
+    <button id="leave" hidden>Desconectar</button>
     <button id="tapPlay" hidden>Toque para ouvir</button>
     <audio id="aud" playsinline></audio>
     <div class="status" id="phStatus"></div>
@@ -213,32 +214,48 @@ function playAudio(){
 }
 $('tapPlay').onclick = playAudio;
 
+function disconnectPhone(msg, kind){
+  if(phPeer){ const p = phPeer; phPeer = null; p.destroy(); }
+  const a = $('aud'); a.pause(); a.srcObject = null;
+  if(wake){ wake.release().catch(() => {}); wake = null; }
+  $('tapPlay').hidden = true;
+  $('leave').hidden = true;
+  $('go').hidden = false;
+  $('codeIn').disabled = false;
+  setStatus($('phStatus'), msg || 'Desconectado.', kind || '');
+}
+
 function connectPhone(){
   const code = $('codeIn').value.trim().toLowerCase();
   if(code.length < 6){ setStatus($('phStatus'), 'Digite o código de 6 caracteres que aparece no PC.', 'err'); return; }
-  if(phPeer){ phPeer.destroy(); phPeer = null; }
+  if(phPeer){ const old = phPeer; phPeer = null; old.destroy(); }
   setStatus($('phStatus'), 'Conectando...', '');
+  $('go').hidden = true;
+  $('leave').hidden = false;
+  $('codeIn').disabled = true;
   keepAwake();
   const peer = new Peer();
   phPeer = peer;
+  const gone = (msg, kind) => { if(phPeer === peer) disconnectPhone(msg, kind); };
   peer.on('open', () => {
     const conn = peer.connect(PREFIX + code, { reliable: true });
     conn.on('open', () => setStatus($('phStatus'), 'Conectado ao PC, aguardando o áudio...', 'ok'));
-    conn.on('close', () => setStatus($('phStatus'), 'O PC desconectou.', 'err'));
+    conn.on('close', () => gone('O PC desconectou.', 'err'));
   });
   peer.on('call', call => {
     call.answer(undefined, { sdpTransform: tune });
     call.on('stream', stream => { $('aud').srcObject = stream; lowLatency(call); playAudio(); });
-    call.on('close', () => setStatus($('phStatus'), 'O áudio foi encerrado no PC.', 'err'));
+    call.on('close', () => gone('O áudio foi encerrado no PC.', 'err'));
   });
   peer.on('error', e => {
     const msg = e.type === 'peer-unavailable'
       ? 'Código não encontrado. Confira se o PC ainda está compartilhando.'
       : 'Erro de conexão (' + e.type + ').';
-    setStatus($('phStatus'), msg, 'err');
+    gone(msg, 'err');
   });
 }
 $('go').onclick = connectPhone;
+$('leave').onclick = () => disconnectPhone('Desconectado.', '');
 $('codeIn').addEventListener('keydown', e => { if(e.key === 'Enter') connectPhone(); });
 
 /* ---------------- INICIO ---------------- */
